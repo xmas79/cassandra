@@ -28,12 +28,16 @@ import com.google.common.base.CharMatcher;
 import com.google.common.base.Objects;
 
 import org.apache.cassandra.db.Directories;
+import org.apache.cassandra.db.Directories.DataDirectory;
 import org.apache.cassandra.io.sstable.format.SSTableFormat;
 import org.apache.cassandra.io.sstable.format.Version;
 import org.apache.cassandra.io.sstable.metadata.IMetadataSerializer;
 import org.apache.cassandra.io.sstable.metadata.LegacyMetadataSerializer;
 import org.apache.cassandra.io.sstable.metadata.MetadataSerializer;
 import org.apache.cassandra.utils.Pair;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.cassandra.io.sstable.Component.separator;
 
@@ -46,10 +50,13 @@ import static org.apache.cassandra.io.sstable.Component.separator;
  */
 public class Descriptor
 {
+    private static final Logger logger = LoggerFactory.getLogger(Descriptor.class);
+
     public static String TMP_EXT = ".tmp";
 
     /** canonicalized path to the directory where SSTable resides */
-    public final File directory;
+    public final File dataDirectory;
+    public final File ssdDirectory;
     /** version has the following format: <code>[a-z]+</code> */
     public final Version version;
     public final String ksname;
@@ -59,37 +66,76 @@ public class Descriptor
     /** digest component - might be {@code null} for old, legacy sstables */
     public final Component digestComponent;
     private final int hashCode;
-
+    
     /**
      * A descriptor that assumes CURRENT_VERSION.
      */
     @VisibleForTesting
-    public Descriptor(File directory, String ksname, String cfname, int generation)
+    public Descriptor(File dataDirectory, String ksname, String cfname, int generation)
     {
-        this(SSTableFormat.Type.current().info.getLatestVersion(), directory, ksname, cfname, generation, SSTableFormat.Type.current(), null);
+        this(SSTableFormat.Type.current().info.getLatestVersion(), dataDirectory, ksname, cfname, generation, SSTableFormat.Type.current(), null);
     }
 
     /**
      * Constructor for sstable writers only.
      */
-    public Descriptor(File directory, String ksname, String cfname, int generation, SSTableFormat.Type formatType)
+    public Descriptor(File dataDirectory, String ksname, String cfname, int generation, SSTableFormat.Type formatType)
     {
-        this(formatType.info.getLatestVersion(), directory, ksname, cfname, generation, formatType, Component.digestFor(formatType.info.getLatestVersion().uncompressedChecksumType()));
+        this(formatType.info.getLatestVersion(), dataDirectory, ksname, cfname, generation, formatType, Component.digestFor(formatType.info.getLatestVersion().uncompressedChecksumType()));
     }
 
     @VisibleForTesting
-    public Descriptor(String version, File directory, String ksname, String cfname, int generation, SSTableFormat.Type formatType)
+    public Descriptor(String version, File dataDirectory, String ksname, String cfname, int generation, SSTableFormat.Type formatType)
     {
-        this(formatType.info.getVersion(version), directory, ksname, cfname, generation, formatType, Component.digestFor(formatType.info.getLatestVersion().uncompressedChecksumType()));
+        this(formatType.info.getVersion(version), dataDirectory, ksname, cfname, generation, formatType, Component.digestFor(formatType.info.getLatestVersion().uncompressedChecksumType()));
     }
 
-    public Descriptor(Version version, File directory, String ksname, String cfname, int generation, SSTableFormat.Type formatType, Component digestComponent)
+    public Descriptor(Version version, File dataDirectory, String ksname, String cfname, int generation, SSTableFormat.Type formatType, Component digestComponent) 
     {
-        assert version != null && directory != null && ksname != null && cfname != null && formatType.info.getLatestVersion().getClass().equals(version.getClass());
+        DataDirectory[] dataDirectories = Directories.dataDirectories;
+        DataDirectory[] ssdDirectories = Directories.ssdDirectories;
+        assert ssdDirectories != null && ssdDirectories.length > 0;
+        assert version != null && dataDirectory != null && ksname != null && cfname != null && formatType.info.getLatestVersion().getClass().equals(version.getClass());
+        
+        String dataCanonical, ssdCanonical;
         this.version = version;
         try
         {
-            this.directory = directory.getCanonicalFile();
+            // Check if dataDirectory really belongs to "dataDirectory"
+            String canonicalString = dataDirectory.getCanonicalPath();
+            boolean isDataDirectory = false;
+            for (DataDirectory d : dataDirectories) {
+                if (canonicalString.indexOf(d.location.getCanonicalPath()) >= 0) {
+                    isDataDirectory = true;
+                    break;
+                }
+            }
+            if (isDataDirectory) {
+                // Ok, dataDirectory really is dataDirectory
+                this.dataDirectory = dataDirectory.getCanonicalFile();
+                int index = canonicalString.indexOf("/" + ksname + "/");
+                if (index >= 0) {
+                    File ssdPath = ssdDirectories[0].location;
+                    this.ssdDirectory = new File(ssdPath, canonicalString.substring(index)).getCanonicalFile();
+                } else {
+                    logger.error("OOOPS!!! Could not find keyspace name \"{}\" in filename \"{}\"", ksname, canonicalString);
+                    this.ssdDirectory = this.dataDirectory;
+                }
+            } else {
+                // No, dataDirectory really is ssdDirectory
+                this.ssdDirectory = dataDirectory.getCanonicalFile();
+                int index = canonicalString.indexOf("/" + ksname + "/");
+                if (index >= 0) {
+                    File dataPath = dataDirectories[0].location;
+                    this.dataDirectory = new File(dataPath, canonicalString.substring(index)).getCanonicalFile();
+                } else {
+                    logger.error("OOOPS!!! Could not find keyspace name \"{}\" in filename \"{}\"", ksname, canonicalString);
+                    this.dataDirectory = this.ssdDirectory;
+                }
+            }
+            
+            dataCanonical = this.dataDirectory.getCanonicalPath();
+            ssdCanonical = this.ssdDirectory.getCanonicalPath();
         }
         catch (IOException e)
         {
@@ -101,22 +147,22 @@ public class Descriptor
         this.formatType = formatType;
         this.digestComponent = digestComponent;
 
-        hashCode = Objects.hashCode(version, this.directory, generation, ksname, cfname, formatType);
+        hashCode = Objects.hashCode(version, dataCanonical, ssdCanonical, generation, ksname, cfname, formatType);
     }
 
     public Descriptor withGeneration(int newGeneration)
     {
-        return new Descriptor(version, directory, ksname, cfname, newGeneration, formatType, digestComponent);
+        return new Descriptor(version, dataDirectory, ksname, cfname, newGeneration, formatType, digestComponent);
     }
 
     public Descriptor withFormatType(SSTableFormat.Type newType)
     {
-        return new Descriptor(newType.info.getLatestVersion(), directory, ksname, cfname, generation, newType, digestComponent);
+        return new Descriptor(newType.info.getLatestVersion(), dataDirectory, ksname, cfname, generation, newType, digestComponent);
     }
 
     public Descriptor withDigestComponent(Component newDigestComponent)
     {
-        return new Descriptor(version, directory, ksname, cfname, generation, formatType, newDigestComponent);
+        return new Descriptor(version, dataDirectory, ksname, cfname, generation, formatType, newDigestComponent);
     }
 
     public String tmpFilenameFor(Component component)
@@ -126,13 +172,14 @@ public class Descriptor
 
     public String filenameFor(Component component)
     {
-        return baseFilename() + separator + component.name();
+        return baseFilename(component) + separator + component.name();
     }
 
-    public String baseFilename()
+    public String baseFilename(Component component)
     {
+        File baseDir = (component == Component.DATA ? dataDirectory : ssdDirectory);
         StringBuilder buff = new StringBuilder();
-        buff.append(directory).append(File.separatorChar);
+        buff.append(baseDir).append(File.separatorChar);
         appendFileName(buff);
         return buff.toString();
     }
@@ -167,7 +214,13 @@ public class Descriptor
     public List<File> getTemporaryFiles()
     {
         List<File> ret = new ArrayList<>();
-        File[] tmpFiles = directory.listFiles((dir, name) ->
+        File[] tmpFiles = dataDirectory.listFiles((dir, name) ->
+                                              name.endsWith(Descriptor.TMP_EXT));
+
+        for (File tmpFile : tmpFiles)
+            ret.add(tmpFile);
+
+        tmpFiles = ssdDirectory.listFiles((dir, name) ->
                                               name.endsWith(Descriptor.TMP_EXT));
 
         for (File tmpFile : tmpFiles)
@@ -338,7 +391,15 @@ public class Descriptor
     @Override
     public String toString()
     {
-        return baseFilename();
+        final StringBuilder buff = new StringBuilder();
+        buff.append(ksname).append("/");
+        buff.append(cfname).append(separator);
+        buff.append(generation).append(separator);
+        buff.append(formatType).append(" [ ");
+        buff.append(dataDirectory).append(", ");
+        buff.append(ssdDirectory).append(" ]");
+
+        return buff.toString();
     }
 
     @Override
@@ -349,11 +410,13 @@ public class Descriptor
         if (!(o instanceof Descriptor))
             return false;
         Descriptor that = (Descriptor)o;
-        return that.directory.equals(this.directory)
-                       && that.generation == this.generation
-                       && that.ksname.equals(this.ksname)
-                       && that.cfname.equals(this.cfname)
-                       && that.formatType == this.formatType;
+        
+        return that.dataDirectory.equals(this.dataDirectory)
+            && that.ssdDirectory.equals(this.ssdDirectory)
+                                   && that.generation == this.generation
+                                   && that.ksname.equals(this.ksname)
+                                   && that.cfname.equals(this.cfname)
+                                   && that.formatType == this.formatType;
     }
 
     @Override

@@ -411,7 +411,7 @@ class LogTransaction extends Transactional.AbstractTransactional implements Tran
      */
     static boolean removeUnfinishedLeftovers(CFMetaData metadata)
     {
-        return removeUnfinishedLeftovers(new Directories(metadata, ColumnFamilyStore.getInitialDirectories()).getCFDirectories());
+        return removeUnfinishedLeftovers(new Directories(metadata, ColumnFamilyStore.getInitialDataDirectories(), ColumnFamilyStore.getInitialSSDDirectories()).getCFDirectories());
     }
 
     @VisibleForTesting

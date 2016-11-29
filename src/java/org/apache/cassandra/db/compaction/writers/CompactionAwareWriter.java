@@ -206,8 +206,8 @@ public abstract class CompactionAwareWriter extends Transactional.AbstractTransa
         for (SSTableReader sstable : sstables)
         {
             if (directory == null)
-                directory = sstable.descriptor.directory;
-            if (!directory.equals(sstable.descriptor.directory))
+                directory = sstable.descriptor.dataDirectory;
+            if (!directory.equals(sstable.descriptor.dataDirectory))
             {
                 logger.trace("All sstables not from the same disk - putting results in {}", directory);
                 break;

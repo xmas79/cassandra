@@ -108,7 +108,7 @@ public class SSTableOfflineRelevel
                 try
                 {
                     SSTableReader reader = SSTableReader.open(sstable.getKey());
-                    sstableMultimap.put(reader.descriptor.directory, reader);
+                    sstableMultimap.put(reader.descriptor.dataDirectory, reader);
                 }
                 catch (Throwable t)
                 {

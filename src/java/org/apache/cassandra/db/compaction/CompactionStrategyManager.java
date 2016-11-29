@@ -243,7 +243,7 @@ public class CompactionStrategyManager implements INotificationConsumer
             for (int i = 0; i < directories.length; i++)
             {
                 Directories.DataDirectory directory = directories[i];
-                if (sstable.descriptor.directory.getAbsolutePath().startsWith(directory.location.getAbsolutePath()))
+                if (sstable.descriptor.dataDirectory.getAbsolutePath().startsWith(directory.location.getAbsolutePath()))
                     return i;
             }
             return 0;

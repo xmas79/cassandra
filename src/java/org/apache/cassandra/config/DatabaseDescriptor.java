@@ -536,6 +536,26 @@ public class DatabaseDescriptor
                                                                datadir), e);
             }
         }
+        for (String datadir : conf.ssd_file_directories)
+        {
+            if (datadir.equals(conf.commitlog_directory))
+                throw new ConfigurationException("commitlog_directory must not be the same as any ssd_file_directories", false);
+            if (datadir.equals(conf.hints_directory))
+                throw new ConfigurationException("hints_directory must not be the same as any ssd_file_directories", false);
+            if (datadir.equals(conf.saved_caches_directory))
+                throw new ConfigurationException("saved_caches_directory must not be the same as any ssd_file_directories", false);
+
+            try
+            {
+                dataFreeBytes += guessFileStore(datadir).getUnallocatedSpace();
+            }
+            catch (IOException e)
+            {
+                logger.debug("Error checking disk space", e);
+                throw new ConfigurationException(String.format("Unable to check disk space available to %s. Perhaps the Cassandra user does not have the necessary permissions",
+                                                               datadir), e);
+            }
+        }
         if (dataFreeBytes < 64L * 1024 * 1048576) // 64 GB
             logger.warn("Only {} free across all data volumes. Consider adding more capacity to your cluster or removing obsolete snapshots",
                         FBUtilities.prettyPrintMemory(dataFreeBytes));
@@ -1152,8 +1172,14 @@ public class DatabaseDescriptor
             if (conf.data_file_directories.length == 0)
                 throw new ConfigurationException("At least one DataFileDirectory must be specified", false);
 
+            if (conf.ssd_file_directories.length == 0)
+                throw new ConfigurationException("At least one SSDFileDirectory must be specified", false);
+
             for (String dataFileDirectory : conf.data_file_directories)
                 FileUtils.createDirectory(dataFileDirectory);
+
+            for (String ssdFileDirectory : conf.ssd_file_directories)
+                FileUtils.createDirectory(ssdFileDirectory);
 
             if (conf.commitlog_directory == null)
                 throw new ConfigurationException("commitlog_directory must be specified", false);
@@ -1542,6 +1568,11 @@ public class DatabaseDescriptor
     public static String[] getAllDataFileLocations()
     {
         return conf.data_file_directories;
+    }
+
+    public static String[] getAllSSDFileLocations()
+    {
+        return conf.ssd_file_directories;
     }
 
     public static String getCommitLogLocation()

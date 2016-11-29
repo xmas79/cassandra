@@ -87,7 +87,8 @@ import static org.apache.cassandra.utils.Throwables.maybeFail;
 public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 {
     // The directories which will be searched for sstables on cfs instantiation.
-    private static volatile Directories.DataDirectory[] initialDirectories = Directories.dataDirectories;
+    private static volatile Directories.DataDirectory[] initialDataDirectories = Directories.dataDirectories;
+    private static volatile Directories.DataDirectory[] initialSSDDirectories = Directories.ssdDirectories;
 
     /**
      * A hook to add additional directories to initialDirectories.
@@ -102,9 +103,9 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
     {
         assert newDirectories != null;
 
-        Set<Directories.DataDirectory> existing = Sets.newHashSet(initialDirectories);
+        Set<Directories.DataDirectory> existing = Sets.newHashSet(initialDataDirectories);
 
-        List<Directories.DataDirectory> replacementList = Lists.newArrayList(initialDirectories);
+        List<Directories.DataDirectory> replacementList = Lists.newArrayList(initialDataDirectories);
         for (Directories.DataDirectory directory: newDirectories)
         {
             if (!existing.contains(directory))
@@ -115,12 +116,18 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
 
         Directories.DataDirectory[] replacementArray = new Directories.DataDirectory[replacementList.size()];
         replacementList.toArray(replacementArray);
-        initialDirectories = replacementArray;
+        initialDataDirectories = replacementArray;
     }
 
-    public static Directories.DataDirectory[] getInitialDirectories()
+    public static Directories.DataDirectory[] getInitialDataDirectories()
     {
-        Directories.DataDirectory[] src = initialDirectories;
+        Directories.DataDirectory[] src = initialDataDirectories;
+        return Arrays.copyOf(src, src.length);
+    }
+
+    public static Directories.DataDirectory[] getInitialSSDDirectories()
+    {
+        Directories.DataDirectory[] src = initialSSDDirectories;
         return Arrays.copyOf(src, src.length);
     }
 
@@ -422,7 +429,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         if (offline)
             this.directories = directories;
         else
-            this.directories = new Directories(metadata, Directories.dataDirectories);
+            this.directories = new Directories(metadata, Directories.dataDirectories, Directories.ssdDirectories);
 
 
         // compaction strategy should be created after the CFS has been prepared
@@ -584,7 +591,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
                                                                          CFMetaData metadata,
                                                                          boolean loadSSTables)
     {
-        Directories directories = new Directories(metadata, initialDirectories);
+        Directories directories = new Directories(metadata, initialDataDirectories, initialSSDDirectories);
         return createColumnFamilyStore(keyspace, columnFamily, metadata, directories, loadSSTables, true, false);
     }
 
@@ -620,7 +627,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
      */
     public static void  scrubDataDirectories(CFMetaData metadata) throws StartupException
     {
-        Directories directories = new Directories(metadata, initialDirectories);
+        Directories directories = new Directories(metadata, initialDataDirectories, initialSSDDirectories);
         Set<File> cleanedDirectories = new HashSet<>();
 
          // clear ephemeral snapshots that were not properly cleared last session (CASSANDRA-7357)
@@ -640,7 +647,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
         for (Map.Entry<Descriptor,Set<Component>> sstableFiles : directories.sstableLister(Directories.OnTxnErr.IGNORE).list().entrySet())
         {
             Descriptor desc = sstableFiles.getKey();
-            File directory = desc.directory;
+            File directory = desc.dataDirectory;
             Set<Component> components = sstableFiles.getValue();
 
             if (!cleanedDirectories.contains(directory))
@@ -743,7 +750,7 @@ public class ColumnFamilyStore implements ColumnFamilyStoreMBean
             do
             {
                 newDescriptor = new Descriptor(descriptor.version,
-                                               descriptor.directory,
+                                               descriptor.dataDirectory,
                                                descriptor.ksname,
                                                descriptor.cfname,
                                                fileIndexGenerator.incrementAndGet(),

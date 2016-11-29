@@ -549,7 +549,7 @@ public class CompactionManager implements CompactionManagerMBean
                 PartitionPosition diskLast = diskBoundaries.get(directoryIndex);
                 // the location we get from directoryIndex is based on the first key in the sstable
                 // now we need to make sure the last key is less than the boundary as well:
-                return sstable.descriptor.directory.getAbsolutePath().startsWith(location.location.getAbsolutePath()) && sstable.last.compareTo(diskLast) <= 0;
+                return sstable.descriptor.dataDirectory.getAbsolutePath().startsWith(location.location.getAbsolutePath()) && sstable.last.compareTo(diskLast) <= 0;
             }
 
             @Override
@@ -1075,7 +1075,7 @@ public class CompactionManager implements CompactionManagerMBean
 
         logger.info("Cleaning up {}", sstable);
 
-        File compactionFileLocation = sstable.descriptor.directory;
+        File compactionFileLocation = sstable.descriptor.dataDirectory;
         RateLimiter limiter = getRateLimiter();
         double compressionRatio = sstable.getCompressionRatio();
         if (compressionRatio == MetadataCollector.NO_COMPRESSION_RATIO)

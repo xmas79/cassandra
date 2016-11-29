@@ -289,7 +289,7 @@ final class LogFile implements AutoCloseable
     {
         assert type == Type.ADD || type == Type.REMOVE;
 
-        File directory = table.descriptor.directory;
+        File directory = table.descriptor.dataDirectory;
         String fileName = StringUtils.join(directory, File.separator, getFileName());
         replicas.maybeCreateReplica(directory, fileName, records);
         return LogRecord.make(type, table);

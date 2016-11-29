@@ -277,7 +277,7 @@ public class Tracker
         {
             public boolean apply(SSTableReader reader)
             {
-                return reader.descriptor.directory.equals(directory);
+                return reader.descriptor.dataDirectory.equals(directory);
             }
         }, OperationType.UNKNOWN, null));
     }

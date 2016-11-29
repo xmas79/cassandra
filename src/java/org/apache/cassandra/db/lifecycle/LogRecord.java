@@ -28,6 +28,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.zip.CRC32;
+import org.apache.cassandra.io.sstable.Component;
 
 import org.apache.cassandra.io.sstable.SSTable;
 import org.apache.cassandra.io.util.FileUtils;
@@ -148,7 +149,7 @@ final class LogRecord
 
     public static LogRecord make(Type type, SSTable table)
     {
-        String absoluteTablePath = FileUtils.getCanonicalPath(table.descriptor.baseFilename());
+        String absoluteTablePath = FileUtils.getCanonicalPath(table.descriptor.baseFilename(Component.DATA));
         return make(type, getExistingFiles(absoluteTablePath), table.getAllFilePaths().size(), absoluteTablePath);
     }
 
